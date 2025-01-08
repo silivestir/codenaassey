@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Voice & Code Editing</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.0/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.0/theme/dracula.min.css">
+    <style>
+        #editor {
+            width: 100%;
+            height: 300px;
+            margin-top: 20px;
+        }
+        #audio {
+            width: 100%;
+            height: 50px;
+        }
+        #output {
+            margin-top: 20px;
+            white-space: pre-wrap;
+        }
+    </style>
+</head>
+<body>
+    <h1>code na assey</h1>
+
+    <!-- Buttons for controlling the voice chat -->
+    <button id="startBtn">Start Voice Chat</button>
+    <button id="stopBtn" disabled>Stop Voice Chat</button>
+
+    <audio id="audio" autoplay></audio>
+
+    <!-- Collaborative Code Editor -->
+    <textarea id="editor"></textarea>
+
+    <button id="runBtn">Run Code</button>
+    <pre id="output"></pre> <!-- Display code output here -->
+
+    <!-- Socket.io -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.0/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.61.0/mode/javascript/javascript.min.js"></script>
+    <script>
+        const socket = io();
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const audio = document.getElementById('audio');
+        const editorElement = document.getElementById('editor');
+        const outputElement = document.getElementById('output');
+        const runBtn = document.getElementById('runBtn');
+        
+        let localStream;
+        let peerConnection;
+        let user = 'user1'; // For demonstration purposes
+        let isUserTyping = false; // To avoid overwriting changes from others
+
+        // STUN server configuration for WebRTC
+        const iceServers = {
+            iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+
+        // CodeMirror setup for code editor
+        const editor = CodeMirror.fromTextArea(editorElement, {
+            lineNumbers: true,
+            mode: "javascript",
+            theme: "dracula",
+            value: 'console.log("Hello, world!");',
+        });
+
+        // Start voice chat
+        startBtn.addEventListener('click', () => {
+            navigator.mediaDevices.getUserMedia({ audio: true })
+                .then(stream => {
+                    localStream = stream;
+                    audio.srcObject = stream;
+                    startBtn.disabled = true;
+                    stopBtn.disabled = false;
+
+                    peerConnection = new RTCPeerConnection(iceServers);
+                    peerConnection.addStream(localStream);
+
+                    // Emit a signal to connect with another user
+                    socket.emit('start', { message: 'Start chat' });
+                })
+                .catch(err => console.error('Error accessing media devices.', err));
+        });
+
+        // Stop voice chat
+        stopBtn.addEventListener('click', () => {
+            localStream.getTracks().forEach(track => track.stop());
+            peerConnection.close();
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            socket.emit('stop', { message: 'Stop chat' });
+        });
+
+        // Real-time collaborative code editing
+        editor.on('keyup', () => {
+            if (!isUserTyping) {
+                const code = editor.getValue();
+                socket.emit('document-update', { code });
+            }
+        });
+
+        socket.on('document-update', (msg) => {
+            // Update the editor with the new code if it's coming from another user
+            if (msg.code !== editor.getValue()) {
+                isUserTyping = true;
+                editor.setValue(msg.code);
+                isUserTyping = false;
+            }
+        });
+
+        // Code execution and output display
+        runBtn.addEventListener('click', () => {
+            const code = editor.getValue();  // Get the code from the editor
+            console.log('Running Code:', code); // Debugging: Check if the code is being sent
+            socket.emit('run-code', code);  // Send code to the server for execution
+        });
+
+        socket.on('code-output', (output) => {
+            console.log('Code Output:', output); // Debugging: Check the server's response
+            outputElement.textContent = output;  // Display the result/output from the server
+        });
+    </script>
+</body>
+</html>
